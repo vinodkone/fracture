@@ -1,0 +1,274 @@
+import fs from 'fs/promises';
+import path from 'path';
+import {
+  getMembers,
+  createMember,
+  getMember,
+  updateMember,
+  deleteMember,
+  getGroups,
+  createGroup,
+  getGroup,
+  updateGroup,
+  deleteGroup,
+  addMemberToGroup,
+  removeMemberFromGroup,
+  getExpenses,
+  createExpense,
+  getExpensesByGroup,
+  deleteExpense,
+  getSettlements,
+  createSettlement,
+  getSettlementsByGroup,
+  deleteSettlement,
+} from '../index';
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const TEST_BACKUP_DIR = path.join(process.cwd(), 'data-backup');
+
+// Backup and restore data files for testing
+async function backupData() {
+  try {
+    await fs.mkdir(TEST_BACKUP_DIR, { recursive: true });
+    const files = ['members.json', 'groups.json', 'expenses.json', 'settlements.json'];
+    for (const file of files) {
+      try {
+        await fs.copyFile(path.join(DATA_DIR, file), path.join(TEST_BACKUP_DIR, file));
+      } catch {
+        // File might not exist
+      }
+    }
+  } catch {
+    // Backup dir might exist
+  }
+}
+
+async function restoreData() {
+  try {
+    const files = ['members.json', 'groups.json', 'expenses.json', 'settlements.json'];
+    for (const file of files) {
+      try {
+        await fs.copyFile(path.join(TEST_BACKUP_DIR, file), path.join(DATA_DIR, file));
+      } catch {
+        // Restore empty array if backup doesn't exist
+        await fs.writeFile(path.join(DATA_DIR, file), '[]');
+      }
+    }
+    await fs.rm(TEST_BACKUP_DIR, { recursive: true, force: true });
+  } catch {
+    // Cleanup
+  }
+}
+
+async function clearData() {
+  const files = ['members.json', 'groups.json', 'expenses.json', 'settlements.json'];
+  for (const file of files) {
+    await fs.writeFile(path.join(DATA_DIR, file), '[]');
+  }
+}
+
+describe('Database Layer', () => {
+  beforeAll(async () => {
+    await backupData();
+    await clearData();
+  });
+
+  afterAll(async () => {
+    await restoreData();
+  });
+
+  beforeEach(async () => {
+    await clearData();
+  });
+
+  describe('Members', () => {
+    it('should create and retrieve a member', async () => {
+      const member = await createMember({ name: 'Alice' });
+
+      expect(member.id).toBeDefined();
+      expect(member.name).toBe('Alice');
+      expect(member.createdAt).toBeDefined();
+
+      const retrieved = await getMember(member.id);
+      expect(retrieved).toEqual(member);
+    });
+
+    it('should list all members', async () => {
+      await createMember({ name: 'Alice' });
+      await createMember({ name: 'Bob' });
+
+      const members = await getMembers();
+      expect(members).toHaveLength(2);
+    });
+
+    it('should update a member', async () => {
+      const member = await createMember({ name: 'Alice' });
+      const updated = await updateMember(member.id, { name: 'Alice Smith' });
+
+      expect(updated?.name).toBe('Alice Smith');
+    });
+
+    it('should delete a member', async () => {
+      const member = await createMember({ name: 'Alice' });
+      const deleted = await deleteMember(member.id);
+
+      expect(deleted).toBe(true);
+      expect(await getMember(member.id)).toBeNull();
+    });
+  });
+
+  describe('Groups', () => {
+    it('should create and retrieve a group', async () => {
+      const group = await createGroup({ name: 'Trip' });
+
+      expect(group.id).toBeDefined();
+      expect(group.name).toBe('Trip');
+      expect(group.memberIds).toEqual([]);
+
+      const retrieved = await getGroup(group.id);
+      expect(retrieved).toEqual(group);
+    });
+
+    it('should add and remove members from group', async () => {
+      const member = await createMember({ name: 'Alice' });
+      const group = await createGroup({ name: 'Trip' });
+
+      await addMemberToGroup(group.id, member.id);
+      let updated = await getGroup(group.id);
+      expect(updated?.memberIds).toContain(member.id);
+
+      await removeMemberFromGroup(group.id, member.id);
+      updated = await getGroup(group.id);
+      expect(updated?.memberIds).not.toContain(member.id);
+    });
+  });
+
+  describe('Expenses', () => {
+    it('should create and retrieve expenses', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      const expense = await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 5000,
+        paidByMemberId: alice.id,
+        splitBetweenMemberIds: [alice.id, bob.id],
+      });
+
+      expect(expense.id).toBeDefined();
+      expect(expense.amount).toBe(5000);
+
+      const groupExpenses = await getExpensesByGroup(group.id);
+      expect(groupExpenses).toHaveLength(1);
+    });
+
+    it('should delete an expense', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id] });
+
+      const expense = await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 5000,
+        paidByMemberId: alice.id,
+        splitBetweenMemberIds: [alice.id],
+      });
+
+      const deleted = await deleteExpense(expense.id);
+      expect(deleted).toBe(true);
+
+      const expenses = await getExpenses();
+      expect(expenses).toHaveLength(0);
+    });
+  });
+
+  describe('Settlements', () => {
+    it('should create and retrieve settlements', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      const settlement = await createSettlement({
+        groupId: group.id,
+        fromMemberId: bob.id,
+        toMemberId: alice.id,
+        amount: 2500,
+      });
+
+      expect(settlement.id).toBeDefined();
+      expect(settlement.amount).toBe(2500);
+
+      const groupSettlements = await getSettlementsByGroup(group.id);
+      expect(groupSettlements).toHaveLength(1);
+    });
+
+    it('should delete a settlement', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      const settlement = await createSettlement({
+        groupId: group.id,
+        fromMemberId: bob.id,
+        toMemberId: alice.id,
+        amount: 2500,
+      });
+
+      const deleted = await deleteSettlement(settlement.id);
+      expect(deleted).toBe(true);
+
+      const settlements = await getSettlements();
+      expect(settlements).toHaveLength(0);
+    });
+  });
+
+  describe('Integration: Full flow', () => {
+    it('should handle complete expense splitting scenario', async () => {
+      // Create members
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const charlie = await createMember({ name: 'Charlie' });
+
+      // Create group
+      const group = await createGroup({
+        name: 'Paris Trip',
+        memberIds: [alice.id, bob.id, charlie.id],
+      });
+
+      // Add expenses
+      await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 6000, // $60
+        paidByMemberId: alice.id,
+        splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+      });
+
+      await createExpense({
+        groupId: group.id,
+        description: 'Coffee',
+        amount: 3000, // $30
+        paidByMemberId: bob.id,
+        splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+      });
+
+      // Verify expenses
+      const expenses = await getExpensesByGroup(group.id);
+      expect(expenses).toHaveLength(2);
+
+      // Record settlement
+      await createSettlement({
+        groupId: group.id,
+        fromMemberId: charlie.id,
+        toMemberId: alice.id,
+        amount: 3000, // $30
+      });
+
+      // Verify settlement
+      const settlements = await getSettlementsByGroup(group.id);
+      expect(settlements).toHaveLength(1);
+    });
+  });
+});
