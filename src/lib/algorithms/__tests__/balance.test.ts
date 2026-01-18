@@ -1,5 +1,75 @@
-import { calculateBalances, getTotalPaidByMember, getTotalOwedByMember } from '../balance';
-import { Member, Expense, Settlement } from '@/types';
+import { calculateBalances, calculateShares, getTotalPaidByMember, getTotalOwedByMember } from '../balance';
+import { Member, Expense, Settlement, SplitDetail } from '@/types';
+
+describe('calculateShares', () => {
+  it('should calculate equal shares correctly', () => {
+    const splitDetails: SplitDetail[] = [
+      { memberId: 'a', value: 1 },
+      { memberId: 'b', value: 1 },
+      { memberId: 'c', value: 1 },
+    ];
+
+    const shares = calculateShares(6000, 'equal', splitDetails);
+
+    expect(shares.get('a')).toBe(2000);
+    expect(shares.get('b')).toBe(2000);
+    expect(shares.get('c')).toBe(2000);
+  });
+
+  it('should handle equal split with remainder', () => {
+    const splitDetails: SplitDetail[] = [
+      { memberId: 'a', value: 1 },
+      { memberId: 'b', value: 1 },
+      { memberId: 'c', value: 1 },
+    ];
+
+    const shares = calculateShares(100, 'equal', splitDetails);
+
+    // 100 / 3 = 33 with remainder 1
+    expect(shares.get('a')).toBe(34); // Gets the extra cent
+    expect(shares.get('b')).toBe(33);
+    expect(shares.get('c')).toBe(33);
+  });
+
+  it('should calculate shares by proportion correctly', () => {
+    const splitDetails: SplitDetail[] = [
+      { memberId: 'a', value: 2 }, // 2 shares
+      { memberId: 'b', value: 1 }, // 1 share
+    ];
+
+    const shares = calculateShares(3000, 'shares', splitDetails);
+
+    // Total 3 shares: a gets 2/3, b gets 1/3
+    expect(shares.get('a')).toBe(2000);
+    expect(shares.get('b')).toBe(1000);
+  });
+
+  it('should calculate percentage split correctly', () => {
+    const splitDetails: SplitDetail[] = [
+      { memberId: 'a', value: 70 }, // 70%
+      { memberId: 'b', value: 30 }, // 30%
+    ];
+
+    const shares = calculateShares(10000, 'percentage', splitDetails);
+
+    expect(shares.get('a')).toBe(7000);
+    expect(shares.get('b')).toBe(3000);
+  });
+
+  it('should handle percentage rounding correctly', () => {
+    const splitDetails: SplitDetail[] = [
+      { memberId: 'a', value: 33.33 },
+      { memberId: 'b', value: 33.33 },
+      { memberId: 'c', value: 33.34 },
+    ];
+
+    const shares = calculateShares(10000, 'percentage', splitDetails);
+
+    // Should distribute correctly even with rounding
+    const total = (shares.get('a') || 0) + (shares.get('b') || 0) + (shares.get('c') || 0);
+    expect(total).toBe(10000);
+  });
+});
 
 describe('calculateBalances', () => {
   const alice: Member = { id: 'alice-id', name: 'Alice', createdAt: '2024-01-01T00:00:00.000Z' };
@@ -16,14 +86,19 @@ describe('calculateBalances', () => {
     });
   });
 
-  it('should calculate correct balance for single expense split equally', () => {
+  it('should calculate correct balance for equal split', () => {
     const expense: Expense = {
       id: 'exp-1',
       groupId: 'group-1',
       description: 'Dinner',
       amount: 6000, // $60 in cents
       paidByMemberId: alice.id,
-      splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+      splitType: 'equal',
+      splitDetails: [
+        { memberId: alice.id, value: 1 },
+        { memberId: bob.id, value: 1 },
+        { memberId: charlie.id, value: 1 },
+      ],
       createdAt: '2024-01-01T00:00:00.000Z',
     };
 
@@ -41,6 +116,70 @@ describe('calculateBalances', () => {
     expect(charlieBalance?.netBalance).toBe(-2000);
   });
 
+  it('should calculate correct balance for shares split', () => {
+    const expense: Expense = {
+      id: 'exp-1',
+      groupId: 'group-1',
+      description: 'Dinner',
+      amount: 6000,
+      paidByMemberId: alice.id,
+      splitType: 'shares',
+      splitDetails: [
+        { memberId: alice.id, value: 1 }, // 1 share
+        { memberId: bob.id, value: 2 },   // 2 shares
+        { memberId: charlie.id, value: 3 }, // 3 shares
+      ],
+      createdAt: '2024-01-01T00:00:00.000Z',
+    };
+
+    const balances = calculateBalances([expense], [], members);
+
+    // Total 6 shares, amount 6000
+    // Alice: 1/6 = 1000
+    // Bob: 2/6 = 2000
+    // Charlie: 3/6 = 3000
+    const aliceBalance = balances.find((b) => b.memberId === alice.id);
+    const bobBalance = balances.find((b) => b.memberId === bob.id);
+    const charlieBalance = balances.find((b) => b.memberId === charlie.id);
+
+    // Alice paid 6000, owes 1000 -> net +5000
+    expect(aliceBalance?.netBalance).toBe(5000);
+    // Bob paid 0, owes 2000 -> net -2000
+    expect(bobBalance?.netBalance).toBe(-2000);
+    // Charlie paid 0, owes 3000 -> net -3000
+    expect(charlieBalance?.netBalance).toBe(-3000);
+  });
+
+  it('should calculate correct balance for percentage split', () => {
+    const expense: Expense = {
+      id: 'exp-1',
+      groupId: 'group-1',
+      description: 'Dinner',
+      amount: 10000,
+      paidByMemberId: alice.id,
+      splitType: 'percentage',
+      splitDetails: [
+        { memberId: alice.id, value: 50 },  // 50%
+        { memberId: bob.id, value: 30 },    // 30%
+        { memberId: charlie.id, value: 20 }, // 20%
+      ],
+      createdAt: '2024-01-01T00:00:00.000Z',
+    };
+
+    const balances = calculateBalances([expense], [], members);
+
+    const aliceBalance = balances.find((b) => b.memberId === alice.id);
+    const bobBalance = balances.find((b) => b.memberId === bob.id);
+    const charlieBalance = balances.find((b) => b.memberId === charlie.id);
+
+    // Alice paid 10000, owes 5000 -> net +5000
+    expect(aliceBalance?.netBalance).toBe(5000);
+    // Bob paid 0, owes 3000 -> net -3000
+    expect(bobBalance?.netBalance).toBe(-3000);
+    // Charlie paid 0, owes 2000 -> net -2000
+    expect(charlieBalance?.netBalance).toBe(-2000);
+  });
+
   it('should handle multiple expenses correctly', () => {
     const expenses: Expense[] = [
       {
@@ -49,7 +188,12 @@ describe('calculateBalances', () => {
         description: 'Dinner',
         amount: 6000, // $60
         paidByMemberId: alice.id,
-        splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 1 },
+          { memberId: charlie.id, value: 1 },
+        ],
         createdAt: '2024-01-01T00:00:00.000Z',
       },
       {
@@ -58,7 +202,12 @@ describe('calculateBalances', () => {
         description: 'Coffee',
         amount: 3000, // $30
         paidByMemberId: bob.id,
-        splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 1 },
+          { memberId: charlie.id, value: 1 },
+        ],
         createdAt: '2024-01-01T00:00:00.000Z',
       },
     ];
@@ -84,7 +233,12 @@ describe('calculateBalances', () => {
       description: 'Dinner',
       amount: 6000,
       paidByMemberId: alice.id,
-      splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+      splitType: 'equal',
+      splitDetails: [
+        { memberId: alice.id, value: 1 },
+        { memberId: bob.id, value: 1 },
+        { memberId: charlie.id, value: 1 },
+      ],
       createdAt: '2024-01-01T00:00:00.000Z',
     };
 
@@ -110,33 +264,6 @@ describe('calculateBalances', () => {
     // Charlie: -2000 from expense, +2000 from settlement -> net 0
     expect(charlieBalance?.netBalance).toBe(0);
   });
-
-  it('should handle uneven splits correctly', () => {
-    const expense: Expense = {
-      id: 'exp-1',
-      groupId: 'group-1',
-      description: 'Dinner',
-      amount: 100, // $1 = 100 cents, split 3 ways = 33 + 33 + 34
-      paidByMemberId: alice.id,
-      splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
-      createdAt: '2024-01-01T00:00:00.000Z',
-    };
-
-    const balances = calculateBalances([expense], [], members);
-
-    const aliceBalance = balances.find((b) => b.memberId === alice.id);
-    const bobBalance = balances.find((b) => b.memberId === bob.id);
-    const charlieBalance = balances.find((b) => b.memberId === charlie.id);
-
-    // 100 / 3 = 33 with remainder 1
-    // First member (Alice) gets 33 + 1 = 34, others get 33
-    // Alice: paid 100, owes 34 -> net +66
-    expect(aliceBalance?.netBalance).toBe(66);
-    // Bob: paid 0, owes 33 -> net -33
-    expect(bobBalance?.netBalance).toBe(-33);
-    // Charlie: paid 0, owes 33 -> net -33
-    expect(charlieBalance?.netBalance).toBe(-33);
-  });
 });
 
 describe('getTotalPaidByMember', () => {
@@ -148,7 +275,11 @@ describe('getTotalPaidByMember', () => {
         description: 'Dinner',
         amount: 6000,
         paidByMemberId: 'alice-id',
-        splitBetweenMemberIds: ['alice-id', 'bob-id'],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: 'alice-id', value: 1 },
+          { memberId: 'bob-id', value: 1 },
+        ],
         createdAt: '2024-01-01T00:00:00.000Z',
       },
       {
@@ -157,7 +288,11 @@ describe('getTotalPaidByMember', () => {
         description: 'Coffee',
         amount: 1500,
         paidByMemberId: 'alice-id',
-        splitBetweenMemberIds: ['alice-id', 'bob-id'],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: 'alice-id', value: 1 },
+          { memberId: 'bob-id', value: 1 },
+        ],
         createdAt: '2024-01-01T00:00:00.000Z',
       },
     ];
@@ -168,7 +303,7 @@ describe('getTotalPaidByMember', () => {
 });
 
 describe('getTotalOwedByMember', () => {
-  it('should return total owed by member', () => {
+  it('should return total owed by member with equal split', () => {
     const expenses: Expense[] = [
       {
         id: 'exp-1',
@@ -176,12 +311,37 @@ describe('getTotalOwedByMember', () => {
         description: 'Dinner',
         amount: 6000,
         paidByMemberId: 'alice-id',
-        splitBetweenMemberIds: ['alice-id', 'bob-id'],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: 'alice-id', value: 1 },
+          { memberId: 'bob-id', value: 1 },
+        ],
         createdAt: '2024-01-01T00:00:00.000Z',
       },
     ];
 
     expect(getTotalOwedByMember('alice-id', expenses)).toBe(3000);
     expect(getTotalOwedByMember('bob-id', expenses)).toBe(3000);
+  });
+
+  it('should return total owed with percentage split', () => {
+    const expenses: Expense[] = [
+      {
+        id: 'exp-1',
+        groupId: 'group-1',
+        description: 'Dinner',
+        amount: 10000,
+        paidByMemberId: 'alice-id',
+        splitType: 'percentage',
+        splitDetails: [
+          { memberId: 'alice-id', value: 60 },
+          { memberId: 'bob-id', value: 40 },
+        ],
+        createdAt: '2024-01-01T00:00:00.000Z',
+      },
+    ];
+
+    expect(getTotalOwedByMember('alice-id', expenses)).toBe(6000);
+    expect(getTotalOwedByMember('bob-id', expenses)).toBe(4000);
   });
 });

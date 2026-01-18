@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+// Split types
+export const SplitType = z.enum(['equal', 'shares', 'percentage']);
+export type SplitType = z.infer<typeof SplitType>;
+
+// Split detail for a member
+export const SplitDetailSchema = z.object({
+  memberId: z.string().uuid(),
+  value: z.number().nonnegative(), // shares count or percentage (0-100)
+});
+export type SplitDetail = z.infer<typeof SplitDetailSchema>;
+
 // Base schemas
 export const MemberSchema = z.object({
   id: z.string().uuid(),
@@ -20,7 +31,8 @@ export const ExpenseSchema = z.object({
   description: z.string().min(1).max(200),
   amount: z.number().int().positive(), // Amount in cents
   paidByMemberId: z.string().uuid(),
-  splitBetweenMemberIds: z.array(z.string().uuid()).min(1),
+  splitType: SplitType.default('equal'),
+  splitDetails: z.array(SplitDetailSchema).min(1), // Member splits
   createdAt: z.string().datetime(),
 });
 
@@ -54,8 +66,18 @@ export const CreateExpenseSchema = z.object({
   description: z.string().min(1).max(200),
   amount: z.number().int().positive(),
   paidByMemberId: z.string().uuid(),
-  splitBetweenMemberIds: z.array(z.string().uuid()).min(1),
-});
+  splitType: SplitType.default('equal'),
+  splitDetails: z.array(SplitDetailSchema).min(1),
+}).refine(
+  (data) => {
+    if (data.splitType === 'percentage') {
+      const total = data.splitDetails.reduce((sum, d) => sum + d.value, 0);
+      return Math.abs(total - 100) < 0.01; // Allow small floating point errors
+    }
+    return true;
+  },
+  { message: 'Percentages must add up to 100%' }
+);
 
 export const CreateSettlementSchema = z.object({
   groupId: z.string().uuid(),
@@ -89,4 +111,17 @@ export interface GroupBalances {
   groupName: string;
   memberBalances: MemberBalance[];
   simplifiedDebts: SimplifiedDebt[];
+}
+
+// Helper to convert old format (splitBetweenMemberIds) to new format (splitDetails)
+export function convertToSplitDetails(memberIds: string[]): SplitDetail[] {
+  return memberIds.map((memberId) => ({
+    memberId,
+    value: 1, // Equal share
+  }));
+}
+
+// Helper to get member IDs from split details
+export function getMemberIdsFromSplitDetails(splitDetails: SplitDetail[]): string[] {
+  return splitDetails.map((d) => d.memberId);
 }

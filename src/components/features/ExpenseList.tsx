@@ -1,6 +1,6 @@
 'use client';
 
-import { Expense, Member } from '@/types';
+import { Expense, Member, SplitType } from '@/types';
 import { Card, CardContent } from '@/components/ui';
 
 interface ExpenseListProps {
@@ -19,6 +19,19 @@ function formatDate(dateString: string): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function formatSplitType(splitType: SplitType): string {
+  switch (splitType) {
+    case 'equal':
+      return 'Equal split';
+    case 'shares':
+      return 'By shares';
+    case 'percentage':
+      return 'By percentage';
+    default:
+      return 'Split';
+  }
 }
 
 export function ExpenseList({ expenses, members, onDelete }: ExpenseListProps) {
@@ -47,7 +60,7 @@ export function ExpenseList({ expenses, members, onDelete }: ExpenseListProps) {
                   Paid by {getMemberName(expense.paidByMemberId)}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Split between {expense.splitBetweenMemberIds.length} people
+                  {formatSplitType(expense.splitType)} • {expense.splitDetails.length} {expense.splitDetails.length === 1 ? 'person' : 'people'}
                 </p>
               </div>
               <div className="text-right">

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getExpenses, getExpensesByGroup, createExpense, getExpense, updateExpense, deleteExpense, getGroup } from '@/lib/db';
-import { CreateExpenseSchema } from '@/types';
+import { CreateExpenseSchema, getMemberIdsFromSplitDetails } from '@/types';
 
 export async function GET(request: NextRequest) {
   try {
@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate all split members are in group
-    const invalidMembers = parsed.data.splitBetweenMemberIds.filter(
+    const splitMemberIds = getMemberIdsFromSplitDetails(parsed.data.splitDetails);
+    const invalidMembers = splitMemberIds.filter(
       (id) => !group.memberIds.includes(id)
     );
     if (invalidMembers.length > 0) {

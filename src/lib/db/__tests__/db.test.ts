@@ -144,7 +144,7 @@ describe('Database Layer', () => {
   });
 
   describe('Expenses', () => {
-    it('should create and retrieve expenses', async () => {
+    it('should create and retrieve expenses with equal split', async () => {
       const alice = await createMember({ name: 'Alice' });
       const bob = await createMember({ name: 'Bob' });
       const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
@@ -154,14 +154,60 @@ describe('Database Layer', () => {
         description: 'Dinner',
         amount: 5000,
         paidByMemberId: alice.id,
-        splitBetweenMemberIds: [alice.id, bob.id],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 1 },
+        ],
       });
 
       expect(expense.id).toBeDefined();
       expect(expense.amount).toBe(5000);
+      expect(expense.splitType).toBe('equal');
 
       const groupExpenses = await getExpensesByGroup(group.id);
       expect(groupExpenses).toHaveLength(1);
+    });
+
+    it('should create expense with shares split', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      const expense = await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 6000,
+        paidByMemberId: alice.id,
+        splitType: 'shares',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 2 },
+        ],
+      });
+
+      expect(expense.splitType).toBe('shares');
+      expect(expense.splitDetails).toHaveLength(2);
+    });
+
+    it('should create expense with percentage split', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      const expense = await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 10000,
+        paidByMemberId: alice.id,
+        splitType: 'percentage',
+        splitDetails: [
+          { memberId: alice.id, value: 60 },
+          { memberId: bob.id, value: 40 },
+        ],
+      });
+
+      expect(expense.splitType).toBe('percentage');
     });
 
     it('should delete an expense', async () => {
@@ -173,7 +219,8 @@ describe('Database Layer', () => {
         description: 'Dinner',
         amount: 5000,
         paidByMemberId: alice.id,
-        splitBetweenMemberIds: [alice.id],
+        splitType: 'equal',
+        splitDetails: [{ memberId: alice.id, value: 1 }],
       });
 
       const deleted = await deleteExpense(expense.id);
@@ -237,21 +284,31 @@ describe('Database Layer', () => {
         memberIds: [alice.id, bob.id, charlie.id],
       });
 
-      // Add expenses
+      // Add expenses with different split types
       await createExpense({
         groupId: group.id,
         description: 'Dinner',
         amount: 6000, // $60
         paidByMemberId: alice.id,
-        splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 1 },
+          { memberId: charlie.id, value: 1 },
+        ],
       });
 
       await createExpense({
         groupId: group.id,
-        description: 'Coffee',
-        amount: 3000, // $30
+        description: 'Hotel',
+        amount: 30000, // $300
         paidByMemberId: bob.id,
-        splitBetweenMemberIds: [alice.id, bob.id, charlie.id],
+        splitType: 'shares',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 2 }, // Bob had bigger room
+          { memberId: charlie.id, value: 1 },
+        ],
       });
 
       // Verify expenses

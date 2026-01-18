@@ -1,4 +1,65 @@
-import { Expense, Settlement, Member, MemberBalance } from '@/types';
+import { Expense, Settlement, Member, MemberBalance, SplitDetail } from '@/types';
+
+/**
+ * Calculate the share for each member based on split type and details.
+ * Returns a map of memberId to their share in cents.
+ */
+export function calculateShares(
+  amount: number,
+  splitType: string,
+  splitDetails: SplitDetail[]
+): Map<string, number> {
+  const shares = new Map<string, number>();
+
+  if (splitType === 'equal') {
+    // Equal split - divide evenly
+    const sharePerPerson = Math.floor(amount / splitDetails.length);
+    const remainder = amount % splitDetails.length;
+
+    splitDetails.forEach((detail, index) => {
+      // Distribute remainder to first members to handle rounding
+      const share = sharePerPerson + (index < remainder ? 1 : 0);
+      shares.set(detail.memberId, share);
+    });
+  } else if (splitType === 'shares') {
+    // Split by shares - proportional to share count
+    const totalShares = splitDetails.reduce((sum, d) => sum + d.value, 0);
+
+    if (totalShares === 0) {
+      // Fallback to equal if no shares specified
+      splitDetails.forEach((detail) => {
+        shares.set(detail.memberId, Math.floor(amount / splitDetails.length));
+      });
+    } else {
+      let distributed = 0;
+      splitDetails.forEach((detail, index) => {
+        if (index === splitDetails.length - 1) {
+          // Last person gets remainder to ensure total is exact
+          shares.set(detail.memberId, amount - distributed);
+        } else {
+          const share = Math.floor((amount * detail.value) / totalShares);
+          shares.set(detail.memberId, share);
+          distributed += share;
+        }
+      });
+    }
+  } else if (splitType === 'percentage') {
+    // Split by percentage
+    let distributed = 0;
+    splitDetails.forEach((detail, index) => {
+      if (index === splitDetails.length - 1) {
+        // Last person gets remainder to ensure total is exact
+        shares.set(detail.memberId, amount - distributed);
+      } else {
+        const share = Math.floor((amount * detail.value) / 100);
+        shares.set(detail.memberId, share);
+        distributed += share;
+      }
+    });
+  }
+
+  return shares;
+}
 
 /**
  * Calculate net balance for each member in a group.
@@ -23,22 +84,20 @@ export function calculateBalances(
 
   // Process expenses
   for (const expense of expenses) {
-    const { amount, paidByMemberId, splitBetweenMemberIds } = expense;
+    const { amount, paidByMemberId, splitType, splitDetails } = expense;
 
     // The payer paid the full amount, so they are owed that amount
     const currentPayerBalance = balanceMap.get(paidByMemberId) || 0;
     balanceMap.set(paidByMemberId, currentPayerBalance + amount);
 
-    // Each person in the split owes their share
-    const sharePerPerson = Math.floor(amount / splitBetweenMemberIds.length);
-    const remainder = amount % splitBetweenMemberIds.length;
+    // Calculate each person's share based on split type
+    const shares = calculateShares(amount, splitType, splitDetails);
 
-    splitBetweenMemberIds.forEach((memberId, index) => {
-      // Distribute remainder to first members to handle rounding
-      const share = sharePerPerson + (index < remainder ? 1 : 0);
+    // Each person owes their share
+    for (const [memberId, share] of shares) {
       const currentBalance = balanceMap.get(memberId) || 0;
       balanceMap.set(memberId, currentBalance - share);
-    });
+    }
   }
 
   // Process settlements
@@ -85,11 +144,10 @@ export function getTotalOwedByMember(
 ): number {
   let total = 0;
   for (const expense of expenses) {
-    if (expense.splitBetweenMemberIds.includes(memberId)) {
-      const share = Math.floor(
-        expense.amount / expense.splitBetweenMemberIds.length
-      );
-      total += share;
+    const shares = calculateShares(expense.amount, expense.splitType, expense.splitDetails);
+    const memberShare = shares.get(memberId);
+    if (memberShare !== undefined) {
+      total += memberShare;
     }
   }
   return total;

@@ -3,10 +3,16 @@
 import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Input, Select, Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
-import { Member } from '@/types';
+import { Member, SplitType, SplitDetail } from '@/types';
 
 interface PageProps {
   params: Promise<{ groupId: string }>;
+}
+
+interface MemberSplitState {
+  memberId: string;
+  selected: boolean;
+  value: number;
 }
 
 export default function NewExpensePage({ params }: PageProps) {
@@ -16,7 +22,8 @@ export default function NewExpensePage({ params }: PageProps) {
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [paidByMemberId, setPaidByMemberId] = useState('');
-  const [splitBetweenMemberIds, setSplitBetweenMemberIds] = useState<string[]>([]);
+  const [splitType, setSplitType] = useState<SplitType>('equal');
+  const [memberSplits, setMemberSplits] = useState<MemberSplitState[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,8 +34,12 @@ export default function NewExpensePage({ params }: PageProps) {
         if (res.ok) {
           const data = await res.json();
           setMembers(data);
-          // Default: split between all members
-          setSplitBetweenMemberIds(data.map((m: Member) => m.id));
+          // Default: split between all members with value 1
+          setMemberSplits(data.map((m: Member) => ({
+            memberId: m.id,
+            selected: true,
+            value: splitType === 'percentage' ? Math.floor(100 / data.length) : 1,
+          })));
         }
       } catch (err) {
         console.error('Failed to fetch members:', err);
@@ -37,12 +48,51 @@ export default function NewExpensePage({ params }: PageProps) {
     fetchMembers();
   }, [groupId]);
 
+  // Update default values when split type changes
+  useEffect(() => {
+    if (members.length === 0) return;
+
+    const selectedMembers = memberSplits.filter(m => m.selected);
+    const selectedCount = selectedMembers.length || 1;
+
+    setMemberSplits(prev => prev.map(ms => ({
+      ...ms,
+      value: splitType === 'percentage'
+        ? (ms.selected ? Math.floor(100 / selectedCount) : 0)
+        : 1,
+    })));
+  }, [splitType]);
+
   const toggleMemberSplit = (memberId: string) => {
-    if (splitBetweenMemberIds.includes(memberId)) {
-      setSplitBetweenMemberIds(splitBetweenMemberIds.filter((id) => id !== memberId));
-    } else {
-      setSplitBetweenMemberIds([...splitBetweenMemberIds, memberId]);
-    }
+    setMemberSplits(prev => {
+      const updated = prev.map(ms =>
+        ms.memberId === memberId ? { ...ms, selected: !ms.selected } : ms
+      );
+
+      // For percentage split, redistribute evenly among selected members
+      if (splitType === 'percentage') {
+        const selectedCount = updated.filter(m => m.selected).length || 1;
+        const evenPercentage = Math.floor(100 / selectedCount);
+        return updated.map(ms => ({
+          ...ms,
+          value: ms.selected ? evenPercentage : 0,
+        }));
+      }
+
+      return updated;
+    });
+  };
+
+  const updateMemberValue = (memberId: string, value: number) => {
+    setMemberSplits(prev => prev.map(ms =>
+      ms.memberId === memberId ? { ...ms, value } : ms
+    ));
+  };
+
+  const getSelectedSplitDetails = (): SplitDetail[] => {
+    return memberSplits
+      .filter(ms => ms.selected)
+      .map(ms => ({ memberId: ms.memberId, value: ms.value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,10 +120,31 @@ export default function NewExpensePage({ params }: PageProps) {
         return;
       }
 
-      if (splitBetweenMemberIds.length === 0) {
+      const splitDetails = getSelectedSplitDetails();
+      if (splitDetails.length === 0) {
         setError('Please select at least one person to split with');
         setIsLoading(false);
         return;
+      }
+
+      // Validate percentage adds up to 100
+      if (splitType === 'percentage') {
+        const total = splitDetails.reduce((sum, d) => sum + d.value, 0);
+        if (Math.abs(total - 100) > 0.01) {
+          setError(`Percentages must add up to 100% (currently ${total}%)`);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Validate shares are positive
+      if (splitType === 'shares') {
+        const hasInvalidShares = splitDetails.some(d => d.value <= 0);
+        if (hasInvalidShares) {
+          setError('All shares must be greater than 0');
+          setIsLoading(false);
+          return;
+        }
       }
 
       const res = await fetch('/api/expenses', {
@@ -84,7 +155,8 @@ export default function NewExpensePage({ params }: PageProps) {
           description,
           amount: amountInCents,
           paidByMemberId,
-          splitBetweenMemberIds,
+          splitType,
+          splitDetails,
         }),
       });
 
@@ -101,10 +173,37 @@ export default function NewExpensePage({ params }: PageProps) {
     }
   };
 
-  const perPersonAmount =
-    splitBetweenMemberIds.length > 0 && amount
-      ? (parseFloat(amount) / splitBetweenMemberIds.length).toFixed(2)
-      : '0.00';
+  const calculatePerPersonAmount = (memberId: string): string => {
+    if (!amount) return '0.00';
+    const amountNum = parseFloat(amount);
+    const splitDetails = getSelectedSplitDetails();
+    const memberSplit = splitDetails.find(d => d.memberId === memberId);
+
+    if (!memberSplit) return '0.00';
+
+    if (splitType === 'equal') {
+      return (amountNum / splitDetails.length).toFixed(2);
+    } else if (splitType === 'shares') {
+      const totalShares = splitDetails.reduce((sum, d) => sum + d.value, 0);
+      if (totalShares === 0) return '0.00';
+      return ((amountNum * memberSplit.value) / totalShares).toFixed(2);
+    } else if (splitType === 'percentage') {
+      return ((amountNum * memberSplit.value) / 100).toFixed(2);
+    }
+    return '0.00';
+  };
+
+  const getTotalPercentage = (): number => {
+    return memberSplits
+      .filter(ms => ms.selected)
+      .reduce((sum, ms) => sum + ms.value, 0);
+  };
+
+  const getTotalShares = (): number => {
+    return memberSplits
+      .filter(ms => ms.selected)
+      .reduce((sum, ms) => sum + ms.value, 0);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -147,34 +246,77 @@ export default function NewExpensePage({ params }: PageProps) {
                 options={members.map((m) => ({ value: m.id, label: m.name }))}
               />
 
+              <Select
+                label="Split type"
+                value={splitType}
+                onChange={(e) => setSplitType(e.target.value as SplitType)}
+                options={[
+                  { value: 'equal', label: 'Equal split' },
+                  { value: 'shares', label: 'By shares' },
+                  { value: 'percentage', label: 'By percentage' },
+                ]}
+              />
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Split between
+                  {splitType === 'percentage' && (
+                    <span className={`ml-2 text-xs ${getTotalPercentage() === 100 ? 'text-green-600' : 'text-red-600'}`}>
+                      (Total: {getTotalPercentage()}%)
+                    </span>
+                  )}
+                  {splitType === 'shares' && (
+                    <span className="ml-2 text-xs text-gray-500">
+                      (Total: {getTotalShares()} shares)
+                    </span>
+                  )}
                 </label>
                 <div className="space-y-2">
-                  {members.map((member) => (
-                    <label
-                      key={member.id}
-                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={splitBetweenMemberIds.includes(member.id)}
-                        onChange={() => toggleMemberSplit(member.id)}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                      />
-                      <span className="flex-1">{member.name}</span>
-                      {splitBetweenMemberIds.includes(member.id) && amount && (
-                        <span className="text-sm text-gray-600">${perPersonAmount}</span>
-                      )}
-                    </label>
-                  ))}
+                  {members.map((member) => {
+                    const memberSplit = memberSplits.find(ms => ms.memberId === member.id);
+                    const isSelected = memberSplit?.selected ?? false;
+                    const splitValue = memberSplit?.value ?? 1;
+
+                    return (
+                      <div
+                        key={member.id}
+                        className={`flex items-center gap-3 p-3 rounded-lg ${
+                          isSelected ? 'bg-blue-50' : 'bg-gray-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleMemberSplit(member.id)}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <span className="flex-1">{member.name}</span>
+
+                        {splitType !== 'equal' && isSelected && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step={splitType === 'percentage' ? '1' : '1'}
+                              value={splitValue}
+                              onChange={(e) => updateMemberValue(member.id, parseFloat(e.target.value) || 0)}
+                              className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                            />
+                            <span className="text-sm text-gray-500">
+                              {splitType === 'percentage' ? '%' : 'shares'}
+                            </span>
+                          </div>
+                        )}
+
+                        {isSelected && amount && (
+                          <span className="text-sm font-medium text-gray-700">
+                            ${calculatePerPersonAmount(member.id)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                {splitBetweenMemberIds.length > 0 && amount && (
-                  <p className="mt-2 text-sm text-gray-600">
-                    ${perPersonAmount} per person ({splitBetweenMemberIds.length} people)
-                  </p>
-                )}
               </div>
 
               <div className="flex gap-3 pt-4">
