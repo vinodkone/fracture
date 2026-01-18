@@ -112,6 +112,101 @@ describe('Database Layer', () => {
       expect(deleted).toBe(true);
       expect(await getMember(member.id)).toBeNull();
     });
+
+    it('should cascade delete member from groups', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      // Verify member is in group
+      let retrieved = await getGroup(group.id);
+      expect(retrieved?.memberIds).toContain(alice.id);
+
+      // Delete alice
+      await deleteMember(alice.id);
+
+      // Verify alice is removed from group
+      retrieved = await getGroup(group.id);
+      expect(retrieved?.memberIds).not.toContain(alice.id);
+      expect(retrieved?.memberIds).toContain(bob.id);
+    });
+
+    it('should cascade delete member from expenses', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const charlie = await createMember({ name: 'Charlie' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id, charlie.id] });
+
+      // Create expense with alice, bob, charlie
+      await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 6000,
+        paidByMemberId: alice.id,
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 1 },
+          { memberId: charlie.id, value: 1 },
+        ],
+      });
+
+      // Delete bob (not the payer)
+      await deleteMember(bob.id);
+
+      // Expense should still exist but without bob in split
+      const expenses = await getExpenses();
+      expect(expenses).toHaveLength(1);
+      expect(expenses[0].splitDetails).toHaveLength(2);
+      expect(expenses[0].splitDetails.find(d => d.memberId === bob.id)).toBeUndefined();
+    });
+
+    it('should delete expense when payer is deleted', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      // Create expense paid by alice
+      await createExpense({
+        groupId: group.id,
+        description: 'Dinner',
+        amount: 6000,
+        paidByMemberId: alice.id,
+        splitType: 'equal',
+        splitDetails: [
+          { memberId: alice.id, value: 1 },
+          { memberId: bob.id, value: 1 },
+        ],
+      });
+
+      // Delete alice (the payer)
+      await deleteMember(alice.id);
+
+      // Expense should be deleted
+      const expenses = await getExpenses();
+      expect(expenses).toHaveLength(0);
+    });
+
+    it('should cascade delete member from settlements', async () => {
+      const alice = await createMember({ name: 'Alice' });
+      const bob = await createMember({ name: 'Bob' });
+      const group = await createGroup({ name: 'Trip', memberIds: [alice.id, bob.id] });
+
+      // Create settlement
+      await createSettlement({
+        groupId: group.id,
+        fromMemberId: bob.id,
+        toMemberId: alice.id,
+        amount: 2500,
+      });
+
+      // Delete alice
+      await deleteMember(alice.id);
+
+      // Settlement should be deleted
+      const settlements = await getSettlements();
+      expect(settlements).toHaveLength(0);
+    });
   });
 
   describe('Groups', () => {

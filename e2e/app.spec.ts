@@ -101,4 +101,151 @@ test.describe('Fracture App', () => {
     await expect(page).toHaveURL(/\/settle/);
     await expect(page.locator('h3')).toContainText('Settle Up');
   });
+
+  test('should add an expense with shares split', async ({ page }) => {
+    // Create a group
+    await page.goto('/groups/new');
+    await page.getByLabel('Group Name').fill('Shares Split Group');
+    await page.getByPlaceholder('Member 1 name').fill('Isaac');
+    await page.getByRole('button', { name: '+ Add Member' }).click();
+    await page.getByPlaceholder('Member 2 name').fill('Julia');
+    await page.getByRole('button', { name: '+ Add Member' }).click();
+    await page.getByPlaceholder('Member 3 name').fill('Kevin');
+    await page.getByRole('button', { name: 'Create Group' }).click();
+    await page.waitForURL(/\/groups\/[a-f0-9-]+/);
+
+    // Navigate to add expense
+    await page.getByRole('link', { name: 'Add Expense' }).click();
+    await page.waitForURL(/\/expenses\/new/);
+
+    // Fill in expense details
+    await page.getByLabel('Description').fill('Group Dinner');
+    await page.getByLabel('Amount ($)').fill('90');
+    await page.getByLabel('Paid by').selectOption({ label: 'Isaac' });
+
+    // Select shares split type
+    await page.getByLabel('Split type').selectOption('shares');
+
+    // Set different shares (Isaac: 2, Julia: 1, Kevin: 3)
+    const shareInputs = page.locator('input[type="number"][min="0"]');
+    await shareInputs.nth(0).fill('2');
+    await shareInputs.nth(1).fill('1');
+    await shareInputs.nth(2).fill('3');
+
+    // Submit
+    await page.getByRole('button', { name: 'Add Expense' }).click();
+
+    // Verify expense appears
+    await page.waitForURL(/\/groups\/[a-f0-9-]+$/);
+    await expect(page.getByText('Group Dinner')).toBeVisible();
+    await expect(page.getByText('$90.00')).toBeVisible();
+    await expect(page.getByText('By shares')).toBeVisible();
+  });
+
+  test('should add an expense with percentage split', async ({ page }) => {
+    // Create a group
+    await page.goto('/groups/new');
+    await page.getByLabel('Group Name').fill('Percentage Split Group');
+    await page.getByPlaceholder('Member 1 name').fill('Laura');
+    await page.getByRole('button', { name: '+ Add Member' }).click();
+    await page.getByPlaceholder('Member 2 name').fill('Mike');
+    await page.getByRole('button', { name: 'Create Group' }).click();
+    await page.waitForURL(/\/groups\/[a-f0-9-]+/);
+
+    // Navigate to add expense
+    await page.getByRole('link', { name: 'Add Expense' }).click();
+    await page.waitForURL(/\/expenses\/new/);
+
+    // Fill in expense details
+    await page.getByLabel('Description').fill('Hotel Room');
+    await page.getByLabel('Amount ($)').fill('200');
+    await page.getByLabel('Paid by').selectOption({ label: 'Laura' });
+
+    // Select percentage split type
+    await page.getByLabel('Split type').selectOption('percentage');
+
+    // Set percentages (Laura: 70%, Mike: 30%)
+    const percentInputs = page.locator('input[type="number"][min="0"]');
+    await percentInputs.nth(0).fill('70');
+    await percentInputs.nth(1).fill('30');
+
+    // Verify percentage indicator shows 100%
+    await expect(page.getByText('(Total: 100%)')).toBeVisible();
+
+    // Submit
+    await page.getByRole('button', { name: 'Add Expense' }).click();
+
+    // Verify expense appears
+    await page.waitForURL(/\/groups\/[a-f0-9-]+$/);
+    await expect(page.getByText('Hotel Room')).toBeVisible();
+    await expect(page.getByText('$200.00')).toBeVisible();
+    await expect(page.getByText('By percentage')).toBeVisible();
+  });
+
+  test('should show error when percentages do not add up to 100', async ({ page }) => {
+    // Create a group
+    await page.goto('/groups/new');
+    await page.getByLabel('Group Name').fill('Invalid Percentage Group');
+    await page.getByPlaceholder('Member 1 name').fill('Nancy');
+    await page.getByRole('button', { name: '+ Add Member' }).click();
+    await page.getByPlaceholder('Member 2 name').fill('Oscar');
+    await page.getByRole('button', { name: 'Create Group' }).click();
+    await page.waitForURL(/\/groups\/[a-f0-9-]+/);
+
+    // Navigate to add expense
+    await page.getByRole('link', { name: 'Add Expense' }).click();
+    await page.waitForURL(/\/expenses\/new/);
+
+    // Fill in expense details
+    await page.getByLabel('Description').fill('Invalid Split');
+    await page.getByLabel('Amount ($)').fill('100');
+    await page.getByLabel('Paid by').selectOption({ label: 'Nancy' });
+
+    // Select percentage split type
+    await page.getByLabel('Split type').selectOption('percentage');
+
+    // Set invalid percentages (Nancy: 60%, Oscar: 30% = 90%)
+    const percentInputs = page.locator('input[type="number"][min="0"]');
+    await percentInputs.nth(0).fill('60');
+    await percentInputs.nth(1).fill('30');
+
+    // Submit
+    await page.getByRole('button', { name: 'Add Expense' }).click();
+
+    // Verify error message
+    await expect(page.getByText(/Percentages must add up to 100%/)).toBeVisible();
+  });
+
+  test('should edit an existing expense', async ({ page }) => {
+    // Create a group
+    await page.goto('/groups/new');
+    await page.getByLabel('Group Name').fill('Edit Expense Group');
+    await page.getByPlaceholder('Member 1 name').fill('Peter');
+    await page.getByRole('button', { name: '+ Add Member' }).click();
+    await page.getByPlaceholder('Member 2 name').fill('Quinn');
+    await page.getByRole('button', { name: 'Create Group' }).click();
+    await page.waitForURL(/\/groups\/[a-f0-9-]+/);
+
+    // Add an expense
+    await page.getByRole('link', { name: 'Add Expense' }).click();
+    await page.getByLabel('Description').fill('Original Expense');
+    await page.getByLabel('Amount ($)').fill('50');
+    await page.getByLabel('Paid by').selectOption({ label: 'Peter' });
+    await page.getByRole('button', { name: 'Add Expense' }).click();
+    await page.waitForURL(/\/groups\/[a-f0-9-]+$/);
+
+    // Click edit on the expense
+    await page.getByRole('link', { name: 'Edit' }).click();
+    await page.waitForURL(/\/expenses\/[a-f0-9-]+\/edit/);
+
+    // Update the expense
+    await page.getByLabel('Description').fill('Updated Expense');
+    await page.getByLabel('Amount ($)').fill('75');
+    await page.getByRole('button', { name: 'Update Expense' }).click();
+
+    // Verify updated expense appears
+    await page.waitForURL(/\/groups\/[a-f0-9-]+$/);
+    await expect(page.getByText('Updated Expense')).toBeVisible();
+    await expect(page.getByText('$75.00')).toBeVisible();
+  });
 });

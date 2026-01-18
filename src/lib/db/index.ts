@@ -123,6 +123,34 @@ export async function deleteMember(id: string): Promise<boolean> {
   const filtered = members.filter((m) => m.id !== id);
   if (filtered.length === members.length) return false;
 
+  // Cascade delete: remove member from all groups
+  const groups = await getGroups();
+  const updatedGroups = groups.map((g) => ({
+    ...g,
+    memberIds: g.memberIds.filter((memberId) => memberId !== id),
+  }));
+  await writeJsonFile(GROUPS_FILE, updatedGroups);
+
+  // Cascade delete: remove member from expense splits
+  const expenses = await getExpenses();
+  const updatedExpenses = expenses.map((e) => ({
+    ...e,
+    splitDetails: e.splitDetails.filter((d) => d.memberId !== id),
+  }));
+  // Remove expenses that now have no split members or where the payer was deleted
+  const validExpenses = updatedExpenses.filter(
+    (e) => e.splitDetails.length > 0 && e.paidByMemberId !== id
+  );
+  await writeJsonFile(EXPENSES_FILE, validExpenses);
+
+  // Cascade delete: remove settlements involving this member
+  const settlements = await getSettlements();
+  const filteredSettlements = settlements.filter(
+    (s) => s.fromMemberId !== id && s.toMemberId !== id
+  );
+  await writeJsonFile(SETTLEMENTS_FILE, filteredSettlements);
+
+  // Finally delete the member
   await writeJsonFile(MEMBERS_FILE, filtered);
   return true;
 }

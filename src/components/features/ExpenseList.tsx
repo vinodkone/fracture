@@ -1,11 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import { Expense, Member, SplitType } from '@/types';
 import { Card, CardContent } from '@/components/ui';
 
 interface ExpenseListProps {
   expenses: Expense[];
   members: Member[];
+  groupId: string;
   onDelete?: (id: string) => void;
 }
 
@@ -34,7 +36,7 @@ function formatSplitType(splitType: SplitType): string {
   }
 }
 
-export function ExpenseList({ expenses, members, onDelete }: ExpenseListProps) {
+export function ExpenseList({ expenses, members, groupId, onDelete }: ExpenseListProps) {
   const getMemberName = (memberId: string) => {
     const member = members.find((m) => m.id === memberId);
     return member?.name || 'Unknown';
@@ -68,14 +70,22 @@ export function ExpenseList({ expenses, members, onDelete }: ExpenseListProps) {
                   ${formatCents(expense.amount)}
                 </p>
                 <p className="text-xs text-gray-500">{formatDate(expense.createdAt)}</p>
-                {onDelete && (
-                  <button
-                    onClick={() => onDelete(expense.id)}
-                    className="mt-2 text-xs text-red-600 hover:text-red-800"
+                <div className="mt-2 flex gap-2 justify-end">
+                  <Link
+                    href={`/groups/${groupId}/expenses/${expense.id}/edit`}
+                    className="text-xs text-blue-600 hover:text-blue-800"
                   >
-                    Delete
-                  </button>
-                )}
+                    Edit
+                  </Link>
+                  {onDelete && (
+                    <button
+                      onClick={() => onDelete(expense.id)}
+                      className="text-xs text-red-600 hover:text-red-800"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </CardContent>
