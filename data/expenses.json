@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "id": "63e99eb1-4e84-4669-a8fd-2cde817ca910",
+    "groupId": "eb1209c7-eda9-4e35-b949-aea899a81328",
+    "description": "Lunch",
+    "amount": 4000,
+    "paidByMemberId": "9260c5a6-28fd-4a9a-8f16-0eeb58b1eea3",
+    "splitBetweenMemberIds": [
+      "9260c5a6-28fd-4a9a-8f16-0eeb58b1eea3",
+      "403d9f93-b7b2-41fe-b8bb-39de1c740027"
+    ],
+    "createdAt": "2026-01-18T04:08:37.217Z"
+  },
+  {
+    "id": "d79102f3-ed06-44d0-a312-4bcd4cb7ea84",
+    "groupId": "f7fa6e20-4da6-454a-9319-82cae87a5d2c",
+    "description": "Movie tickets",
+    "amount": 3000,
+    "paidByMemberId": "12217f39-ad92-41db-8267-b814dac05e0d",
+    "splitBetweenMemberIds": [
+      "12217f39-ad92-41db-8267-b814dac05e0d",
+      "8370f4dc-17d4-45f1-90df-2cb85ad49087"
+    ],
+    "createdAt": "2026-01-18T04:08:37.712Z"
+  }
+]
