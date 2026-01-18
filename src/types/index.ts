@@ -77,6 +77,15 @@ export const CreateExpenseSchema = z.object({
     return true;
   },
   { message: 'Percentages must add up to 100%' }
+).refine(
+  (data) => {
+    if (data.splitType === 'shares') {
+      // All shares must be positive
+      return data.splitDetails.every((d) => d.value > 0);
+    }
+    return true;
+  },
+  { message: 'All shares must be greater than 0' }
 );
 
 export const CreateSettlementSchema = z.object({

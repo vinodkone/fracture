@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getExpenses, getExpensesByGroup, createExpense, getExpense, updateExpense, deleteExpense, getGroup } from '@/lib/db';
+import { getExpenses, getExpensesByGroup, createExpense, updateExpense, deleteExpense, getGroup } from '@/lib/db';
 import { CreateExpenseSchema, getMemberIdsFromSplitDetails } from '@/types';
 
 export async function GET(request: NextRequest) {

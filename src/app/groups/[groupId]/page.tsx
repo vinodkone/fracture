@@ -61,7 +61,7 @@ export default async function GroupDetailPage({ params }: PageProps) {
         <div className="grid gap-8 lg:grid-cols-2">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Expenses</h2>
-            <ExpenseList expenses={sortedExpenses} members={members} />
+            <ExpenseList expenses={sortedExpenses} members={members} groupId={groupId} />
           </div>
 
           <div>

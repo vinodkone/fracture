@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMembers, createMember, getMember, updateMember, deleteMember } from '@/lib/db';
+import { getMembers, createMember, updateMember, deleteMember } from '@/lib/db';
 import { CreateMemberSchema } from '@/types';
 
 export async function GET() {
