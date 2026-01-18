@@ -34,5 +34,41 @@
       "4c78b0ce-5a2d-4611-8a01-1dbb13d9dbdc"
     ],
     "createdAt": "2026-01-18T04:08:38.029Z"
+  },
+  {
+    "id": "dc9f0ff0-ff01-4978-8e7d-8a4b12671576",
+    "name": "Test Trip",
+    "memberIds": [
+      "ce56a6f0-ff03-47b4-ac96-b4a782d97c38",
+      "d7c56eb0-5eb1-41a6-94a4-0a623de65255"
+    ],
+    "createdAt": "2026-01-18T04:09:37.968Z"
+  },
+  {
+    "id": "44d302d5-ad62-4a5b-8899-a91e07343d36",
+    "name": "Expense Group",
+    "memberIds": [
+      "f6cab4ac-60f6-4b9a-b300-72bd70a4a337",
+      "cc6735fd-d211-4814-a3ca-55a7916676a7"
+    ],
+    "createdAt": "2026-01-18T04:09:38.446Z"
+  },
+  {
+    "id": "3ce0d7d9-c749-4dc6-9283-bd2466d4c075",
+    "name": "Balance Group",
+    "memberIds": [
+      "8e3eea77-ac16-4ff7-9c36-d6cf28dcd062",
+      "cecb96ea-ab9b-4b3d-8db9-22905fce7b32"
+    ],
+    "createdAt": "2026-01-18T04:09:39.962Z"
+  },
+  {
+    "id": "0f2e2042-e45d-4d4e-ac6c-cc9384889fb6",
+    "name": "Settle Group",
+    "memberIds": [
+      "98f6e292-2b3e-4b4d-a3c9-22c927269266",
+      "6f554991-8f97-4fcf-9726-6ece12382436"
+    ],
+    "createdAt": "2026-01-18T04:09:40.429Z"
   }
 ]
