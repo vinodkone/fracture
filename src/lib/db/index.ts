@@ -14,7 +14,47 @@ import {
   CreateGroup,
   CreateExpense,
   CreateSettlement,
+  convertToSplitDetails,
 } from '@/types';
+
+// Type for old expense format (before split types were added)
+interface LegacyExpense {
+  id: string;
+  groupId: string;
+  description: string;
+  amount: number;
+  paidByMemberId: string;
+  splitBetweenMemberIds?: string[];
+  splitType?: string;
+  splitDetails?: { memberId: string; value: number }[];
+  createdAt: string;
+}
+
+/**
+ * Migrate old expense format to new format.
+ * Old format used splitBetweenMemberIds, new format uses splitType and splitDetails.
+ */
+function migrateExpense(raw: LegacyExpense): Expense {
+  // If already in new format, parse directly
+  if (raw.splitDetails && raw.splitType) {
+    return ExpenseSchema.parse(raw);
+  }
+
+  // Migrate from old format
+  if (raw.splitBetweenMemberIds) {
+    const migrated = {
+      ...raw,
+      splitType: 'equal' as const,
+      splitDetails: convertToSplitDetails(raw.splitBetweenMemberIds),
+    };
+    // Remove old field before parsing
+    delete (migrated as Partial<LegacyExpense>).splitBetweenMemberIds;
+    return ExpenseSchema.parse(migrated);
+  }
+
+  // Fallback: try parsing as-is (will throw if invalid)
+  return ExpenseSchema.parse(raw);
+}
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 
@@ -161,8 +201,8 @@ export async function removeMemberFromGroup(
 
 // Expenses CRUD
 export async function getExpenses(): Promise<Expense[]> {
-  const data = await readJsonFile<Expense>(EXPENSES_FILE);
-  return data.map((e) => ExpenseSchema.parse(e));
+  const data = await readJsonFile<LegacyExpense>(EXPENSES_FILE);
+  return data.map((e) => migrateExpense(e));
 }
 
 export async function getExpensesByGroup(groupId: string): Promise<Expense[]> {

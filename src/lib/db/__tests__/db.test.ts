@@ -271,6 +271,43 @@ describe('Database Layer', () => {
     });
   });
 
+  describe('Backward Compatibility', () => {
+    it('should read old expense format with splitBetweenMemberIds', async () => {
+      // Write an old-format expense directly to the JSON file
+      const oldFormatExpense = {
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        groupId: '550e8400-e29b-41d4-a716-446655440001',
+        description: 'Old Dinner',
+        amount: 6000,
+        paidByMemberId: '550e8400-e29b-41d4-a716-446655440002',
+        splitBetweenMemberIds: [
+          '550e8400-e29b-41d4-a716-446655440002',
+          '550e8400-e29b-41d4-a716-446655440003',
+        ],
+        createdAt: '2024-01-01T00:00:00.000Z',
+      };
+
+      await fs.writeFile(
+        path.join(DATA_DIR, 'expenses.json'),
+        JSON.stringify([oldFormatExpense], null, 2)
+      );
+
+      // Should be able to read the expense without error
+      const expenses = await getExpenses();
+      expect(expenses).toHaveLength(1);
+
+      const expense = expenses[0];
+      expect(expense.id).toBe(oldFormatExpense.id);
+      expect(expense.description).toBe('Old Dinner');
+      expect(expense.amount).toBe(6000);
+      // Should have been migrated to new format
+      expect(expense.splitType).toBe('equal');
+      expect(expense.splitDetails).toHaveLength(2);
+      expect(expense.splitDetails[0].memberId).toBe('550e8400-e29b-41d4-a716-446655440002');
+      expect(expense.splitDetails[0].value).toBe(1);
+    });
+  });
+
   describe('Integration: Full flow', () => {
     it('should handle complete expense splitting scenario', async () => {
       // Create members
