@@ -38,6 +38,7 @@ data/                       # JSON data files (members, groups, expenses, settle
 - Dates stored as ISO 8601 strings
 
 ## Git Workflow
+- **Only commit code when build and tests pass**
+- Run `npm run build` and `npm test` before every commit
 - Make incremental commits that are buildable and testable
-- Run `npm run build` before committing to ensure no build errors
-- Run tests before pushing
+- Push to GitHub after each successful commit
