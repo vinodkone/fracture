@@ -37,16 +37,12 @@ data/                       # JSON data files (members, groups, expenses, settle
 - All IDs are UUIDs
 - Dates stored as ISO 8601 strings
 
-## Testing Methodology
-- **Follow Test-Driven Development (TDD)**: Write failing tests first, then implement the fix
+## Testing Notes
 - **Backward compatibility tests**: When changing data schemas, always add tests that:
   - Write old-format data directly to storage (bypassing the API/DB layer)
   - Verify the application can still read and use the old data
 - **Don't rely solely on tests that clear data**: Tests using `clearData()` won't catch migration issues
 - **Test with real-world scenarios**: Consider what happens to existing user data when schemas change
 
-## Git Workflow
-- **Only commit code when build and tests pass**
+## Pre-commit Commands
 - Run `npm run build` and `npm test` before every commit
-- Make incremental commits that are buildable and testable
-- Push to GitHub after each successful commit
