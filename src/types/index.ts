@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+// Re-export auth types
+export * from './auth';
+
 // Split types
 export const SplitType = z.enum(['equal', 'shares', 'percentage']);
 export type SplitType = z.infer<typeof SplitType>;

@@ -17,6 +17,9 @@ import {
   convertToSplitDetails,
 } from '@/types';
 
+// Note: User functions are in ./users.ts and should be imported directly
+// to avoid Edge Runtime issues (they use Node.js fs/path modules)
+
 // Type for old expense format (before split types were added)
 interface LegacyExpense {
   id: string;

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { Providers } from '@/components/features/Providers';
+import { Header } from '@/components/features/Header';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -15,14 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased font-sans">
-        <header className="bg-white border-b border-gray-200">
-          <div className="max-w-4xl mx-auto px-4 py-4">
-            <Link href="/groups" className="text-xl font-bold text-blue-600">
-              Fracture
-            </Link>
-          </div>
-        </header>
-        {children}
+        <Providers>
+          <Header />
+          {children}
+        </Providers>
       </body>
     </html>
   );
