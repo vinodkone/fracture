@@ -1,206 +1,249 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { supabase, DbMember, DbGroup, DbExpense, DbSettlement } from '@/lib/supabase';
 import {
   Member,
   Group,
   Expense,
   Settlement,
-  MemberSchema,
-  GroupSchema,
-  ExpenseSchema,
-  SettlementSchema,
   CreateMember,
   CreateGroup,
   CreateExpense,
   CreateSettlement,
-  convertToSplitDetails,
 } from '@/types';
 
 // Note: User functions are in ./users.ts and should be imported directly
-// to avoid Edge Runtime issues (they use Node.js fs/path modules)
 
-// Type for old expense format (before split types were added)
-interface LegacyExpense {
-  id: string;
-  groupId: string;
-  description: string;
-  amount: number;
-  paidByMemberId: string;
-  splitBetweenMemberIds?: string[];
-  splitType?: string;
-  splitDetails?: { memberId: string; value: number }[];
-  createdAt: string;
+// Convert DB rows to app types
+function toMember(row: DbMember): Member {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+  };
 }
 
-/**
- * Migrate old expense format to new format.
- * Old format used splitBetweenMemberIds, new format uses splitType and splitDetails.
- */
-function migrateExpense(raw: LegacyExpense): Expense {
-  // If already in new format, parse directly
-  if (raw.splitDetails && raw.splitType) {
-    return ExpenseSchema.parse(raw);
-  }
-
-  // Migrate from old format
-  if (raw.splitBetweenMemberIds) {
-    const migrated = {
-      ...raw,
-      splitType: 'equal' as const,
-      splitDetails: convertToSplitDetails(raw.splitBetweenMemberIds),
-    };
-    // Remove old field before parsing
-    delete (migrated as Partial<LegacyExpense>).splitBetweenMemberIds;
-    return ExpenseSchema.parse(migrated);
-  }
-
-  // Fallback: try parsing as-is (will throw if invalid)
-  return ExpenseSchema.parse(raw);
+function toGroup(row: DbGroup): Group {
+  return {
+    id: row.id,
+    name: row.name,
+    memberIds: row.member_ids || [],
+    createdAt: row.created_at,
+  };
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-
-// File paths
-const MEMBERS_FILE = path.join(DATA_DIR, 'members.json');
-const GROUPS_FILE = path.join(DATA_DIR, 'groups.json');
-const EXPENSES_FILE = path.join(DATA_DIR, 'expenses.json');
-const SETTLEMENTS_FILE = path.join(DATA_DIR, 'settlements.json');
-
-// Generic JSON file operations
-async function readJsonFile<T>(filePath: string): Promise<T[]> {
-  try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
+function toExpense(row: DbExpense): Expense {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    description: row.description,
+    amount: row.amount,
+    paidByMemberId: row.paid_by_member_id,
+    splitType: row.split_type as 'equal' | 'shares' | 'percentage',
+    splitDetails: row.split_details || [],
+    createdAt: row.created_at,
+  };
 }
 
-async function writeJsonFile<T>(filePath: string, data: T[]): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+function toSettlement(row: DbSettlement): Settlement {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    fromMemberId: row.from_member_id,
+    toMemberId: row.to_member_id,
+    amount: row.amount,
+    createdAt: row.created_at,
+  };
 }
 
 // Members CRUD
 export async function getMembers(): Promise<Member[]> {
-  const data = await readJsonFile<Member>(MEMBERS_FILE);
-  return data.map((m) => MemberSchema.parse(m));
+  const { data, error } = await supabase
+    .from('members')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(toMember);
 }
 
 export async function getMember(id: string): Promise<Member | null> {
-  const members = await getMembers();
-  return members.find((m) => m.id === id) || null;
+  const { data, error } = await supabase
+    .from('members')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toMember(data) : null;
 }
 
 export async function createMember(input: CreateMember): Promise<Member> {
-  const members = await getMembers();
-  const newMember: Member = {
-    id: uuidv4(),
-    name: input.name,
-    createdAt: new Date().toISOString(),
-  };
-  members.push(newMember);
-  await writeJsonFile(MEMBERS_FILE, members);
-  return newMember;
+  const { data, error } = await supabase
+    .from('members')
+    .insert({ name: input.name })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return toMember(data);
 }
 
 export async function updateMember(
   id: string,
   input: Partial<CreateMember>
 ): Promise<Member | null> {
-  const members = await getMembers();
-  const index = members.findIndex((m) => m.id === id);
-  if (index === -1) return null;
+  const { data, error } = await supabase
+    .from('members')
+    .update({ name: input.name })
+    .eq('id', id)
+    .select()
+    .single();
 
-  members[index] = { ...members[index], ...input };
-  await writeJsonFile(MEMBERS_FILE, members);
-  return members[index];
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toMember(data) : null;
 }
 
 export async function deleteMember(id: string): Promise<boolean> {
-  const members = await getMembers();
-  const filtered = members.filter((m) => m.id !== id);
-  if (filtered.length === members.length) return false;
+  // Get all groups to update member_ids
+  const { data: groups } = await supabase
+    .from('groups')
+    .select('id, member_ids')
+    .contains('member_ids', [id]);
 
-  // Cascade delete: remove member from all groups
-  const groups = await getGroups();
-  const updatedGroups = groups.map((g) => ({
-    ...g,
-    memberIds: g.memberIds.filter((memberId) => memberId !== id),
-  }));
-  await writeJsonFile(GROUPS_FILE, updatedGroups);
+  // Remove member from all groups
+  if (groups && groups.length > 0) {
+    for (const group of groups) {
+      const newMemberIds = (group.member_ids || []).filter((mid: string) => mid !== id);
+      await supabase
+        .from('groups')
+        .update({ member_ids: newMemberIds })
+        .eq('id', group.id);
+    }
+  }
 
-  // Cascade delete: remove member from expense splits
-  const expenses = await getExpenses();
-  const updatedExpenses = expenses.map((e) => ({
-    ...e,
-    splitDetails: e.splitDetails.filter((d) => d.memberId !== id),
-  }));
-  // Remove expenses that now have no split members or where the payer was deleted
-  const validExpenses = updatedExpenses.filter(
-    (e) => e.splitDetails.length > 0 && e.paidByMemberId !== id
-  );
-  await writeJsonFile(EXPENSES_FILE, validExpenses);
+  // Get all expenses to update split_details (remove this member from splits)
+  const { data: expenses } = await supabase
+    .from('expenses')
+    .select('id, split_details, paid_by_member_id');
 
-  // Cascade delete: remove settlements involving this member
-  const settlements = await getSettlements();
-  const filteredSettlements = settlements.filter(
-    (s) => s.fromMemberId !== id && s.toMemberId !== id
-  );
-  await writeJsonFile(SETTLEMENTS_FILE, filteredSettlements);
+  if (expenses && expenses.length > 0) {
+    for (const expense of expenses) {
+      // If this member was the payer, delete the expense
+      if (expense.paid_by_member_id === id) {
+        await supabase.from('expenses').delete().eq('id', expense.id);
+        continue;
+      }
+
+      // Otherwise, remove the member from split_details
+      const splitDetails = expense.split_details as { memberId: string; value: number }[];
+      const memberInSplit = splitDetails.some(d => d.memberId === id);
+
+      if (memberInSplit) {
+        const newSplitDetails = splitDetails.filter(d => d.memberId !== id);
+
+        // If no one left in the split, delete the expense
+        if (newSplitDetails.length === 0) {
+          await supabase.from('expenses').delete().eq('id', expense.id);
+        } else {
+          await supabase
+            .from('expenses')
+            .update({ split_details: newSplitDetails })
+            .eq('id', expense.id);
+        }
+      }
+    }
+  }
+
+  // Delete settlements involving this member
+  await supabase
+    .from('settlements')
+    .delete()
+    .or(`from_member_id.eq.${id},to_member_id.eq.${id}`);
 
   // Finally delete the member
-  await writeJsonFile(MEMBERS_FILE, filtered);
+  const { error } = await supabase
+    .from('members')
+    .delete()
+    .eq('id', id);
+
+  if (error) throw error;
   return true;
 }
 
 // Groups CRUD
 export async function getGroups(): Promise<Group[]> {
-  const data = await readJsonFile<Group>(GROUPS_FILE);
-  return data.map((g) => GroupSchema.parse(g));
+  const { data, error } = await supabase
+    .from('groups')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(toGroup);
 }
 
 export async function getGroup(id: string): Promise<Group | null> {
-  const groups = await getGroups();
-  return groups.find((g) => g.id === id) || null;
+  const { data, error } = await supabase
+    .from('groups')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toGroup(data) : null;
 }
 
 export async function createGroup(input: CreateGroup): Promise<Group> {
-  const groups = await getGroups();
-  const newGroup: Group = {
-    id: uuidv4(),
-    name: input.name,
-    memberIds: input.memberIds || [],
-    createdAt: new Date().toISOString(),
-  };
-  groups.push(newGroup);
-  await writeJsonFile(GROUPS_FILE, groups);
-  return newGroup;
+  const { data, error } = await supabase
+    .from('groups')
+    .insert({
+      name: input.name,
+      member_ids: input.memberIds || [],
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return toGroup(data);
 }
 
 export async function updateGroup(
   id: string,
   input: Partial<CreateGroup>
 ): Promise<Group | null> {
-  const groups = await getGroups();
-  const index = groups.findIndex((g) => g.id === id);
-  if (index === -1) return null;
+  const updateData: Record<string, unknown> = {};
+  if (input.name !== undefined) updateData.name = input.name;
+  if (input.memberIds !== undefined) updateData.member_ids = input.memberIds;
 
-  groups[index] = { ...groups[index], ...input };
-  await writeJsonFile(GROUPS_FILE, groups);
-  return groups[index];
+  const { data, error } = await supabase
+    .from('groups')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toGroup(data) : null;
 }
 
 export async function deleteGroup(id: string): Promise<boolean> {
-  const groups = await getGroups();
-  const filtered = groups.filter((g) => g.id !== id);
-  if (filtered.length === groups.length) return false;
+  // Expenses and settlements will be cascade deleted due to FK constraints
+  const { error } = await supabase
+    .from('groups')
+    .delete()
+    .eq('id', id);
 
-  await writeJsonFile(GROUPS_FILE, filtered);
+  if (error) throw error;
   return true;
 }
 
@@ -212,8 +255,8 @@ export async function addMemberToGroup(
   if (!group) return null;
 
   if (!group.memberIds.includes(memberId)) {
-    group.memberIds.push(memberId);
-    await updateGroup(groupId, { memberIds: group.memberIds });
+    const newMemberIds = [...group.memberIds, memberId];
+    return updateGroup(groupId, { memberIds: newMemberIds });
   }
   return group;
 }
@@ -225,104 +268,171 @@ export async function removeMemberFromGroup(
   const group = await getGroup(groupId);
   if (!group) return null;
 
-  group.memberIds = group.memberIds.filter((id) => id !== memberId);
-  await updateGroup(groupId, { memberIds: group.memberIds });
-  return group;
+  const newMemberIds = group.memberIds.filter((id) => id !== memberId);
+  return updateGroup(groupId, { memberIds: newMemberIds });
 }
 
 // Expenses CRUD
 export async function getExpenses(): Promise<Expense[]> {
-  const data = await readJsonFile<LegacyExpense>(EXPENSES_FILE);
-  return data.map((e) => migrateExpense(e));
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(toExpense);
 }
 
 export async function getExpensesByGroup(groupId: string): Promise<Expense[]> {
-  const expenses = await getExpenses();
-  return expenses.filter((e) => e.groupId === groupId);
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('*')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(toExpense);
 }
 
 export async function getExpense(id: string): Promise<Expense | null> {
-  const expenses = await getExpenses();
-  return expenses.find((e) => e.id === id) || null;
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toExpense(data) : null;
 }
 
 export async function createExpense(input: CreateExpense): Promise<Expense> {
-  const expenses = await getExpenses();
-  const newExpense: Expense = {
-    id: uuidv4(),
-    ...input,
-    createdAt: new Date().toISOString(),
-  };
-  expenses.push(newExpense);
-  await writeJsonFile(EXPENSES_FILE, expenses);
-  return newExpense;
+  const { data, error } = await supabase
+    .from('expenses')
+    .insert({
+      group_id: input.groupId,
+      description: input.description,
+      amount: input.amount,
+      paid_by_member_id: input.paidByMemberId,
+      split_type: input.splitType,
+      split_details: input.splitDetails,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return toExpense(data);
 }
 
 export async function updateExpense(
   id: string,
   input: Partial<CreateExpense>
 ): Promise<Expense | null> {
-  const expenses = await getExpenses();
-  const index = expenses.findIndex((e) => e.id === id);
-  if (index === -1) return null;
+  const updateData: Record<string, unknown> = {};
+  if (input.groupId !== undefined) updateData.group_id = input.groupId;
+  if (input.description !== undefined) updateData.description = input.description;
+  if (input.amount !== undefined) updateData.amount = input.amount;
+  if (input.paidByMemberId !== undefined) updateData.paid_by_member_id = input.paidByMemberId;
+  if (input.splitType !== undefined) updateData.split_type = input.splitType;
+  if (input.splitDetails !== undefined) updateData.split_details = input.splitDetails;
 
-  expenses[index] = { ...expenses[index], ...input };
-  await writeJsonFile(EXPENSES_FILE, expenses);
-  return expenses[index];
+  const { data, error } = await supabase
+    .from('expenses')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toExpense(data) : null;
 }
 
 export async function deleteExpense(id: string): Promise<boolean> {
-  const expenses = await getExpenses();
-  const filtered = expenses.filter((e) => e.id !== id);
-  if (filtered.length === expenses.length) return false;
+  const { error } = await supabase
+    .from('expenses')
+    .delete()
+    .eq('id', id);
 
-  await writeJsonFile(EXPENSES_FILE, filtered);
+  if (error) throw error;
   return true;
 }
 
 // Settlements CRUD
 export async function getSettlements(): Promise<Settlement[]> {
-  const data = await readJsonFile<Settlement>(SETTLEMENTS_FILE);
-  return data.map((s) => SettlementSchema.parse(s));
+  const { data, error } = await supabase
+    .from('settlements')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(toSettlement);
 }
 
-export async function getSettlementsByGroup(
-  groupId: string
-): Promise<Settlement[]> {
-  const settlements = await getSettlements();
-  return settlements.filter((s) => s.groupId === groupId);
+export async function getSettlementsByGroup(groupId: string): Promise<Settlement[]> {
+  const { data, error } = await supabase
+    .from('settlements')
+    .select('*')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(toSettlement);
 }
 
 export async function getSettlement(id: string): Promise<Settlement | null> {
-  const settlements = await getSettlements();
-  return settlements.find((s) => s.id === id) || null;
+  const { data, error } = await supabase
+    .from('settlements')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? toSettlement(data) : null;
 }
 
-export async function createSettlement(
-  input: CreateSettlement
-): Promise<Settlement> {
-  const settlements = await getSettlements();
-  const newSettlement: Settlement = {
-    id: uuidv4(),
-    ...input,
-    createdAt: new Date().toISOString(),
-  };
-  settlements.push(newSettlement);
-  await writeJsonFile(SETTLEMENTS_FILE, settlements);
-  return newSettlement;
+export async function createSettlement(input: CreateSettlement): Promise<Settlement> {
+  const { data, error } = await supabase
+    .from('settlements')
+    .insert({
+      group_id: input.groupId,
+      from_member_id: input.fromMemberId,
+      to_member_id: input.toMemberId,
+      amount: input.amount,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return toSettlement(data);
 }
 
 export async function deleteSettlement(id: string): Promise<boolean> {
-  const settlements = await getSettlements();
-  const filtered = settlements.filter((s) => s.id !== id);
-  if (filtered.length === settlements.length) return false;
+  const { error } = await supabase
+    .from('settlements')
+    .delete()
+    .eq('id', id);
 
-  await writeJsonFile(SETTLEMENTS_FILE, filtered);
+  if (error) throw error;
   return true;
 }
 
 // Utility to get members by IDs
 export async function getMembersByIds(ids: string[]): Promise<Member[]> {
-  const members = await getMembers();
-  return members.filter((m) => ids.includes(m.id));
+  if (ids.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('members')
+    .select('*')
+    .in('id', ids);
+
+  if (error) throw error;
+  return (data || []).map(toMember);
 }

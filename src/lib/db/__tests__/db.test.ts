@@ -1,5 +1,3 @@
-import fs from 'fs/promises';
-import path from 'path';
 import {
   getMembers,
   createMember,
@@ -8,8 +6,10 @@ import {
   deleteMember,
   createGroup,
   getGroup,
+  getGroups,
   addMemberToGroup,
   removeMemberFromGroup,
+  deleteGroup,
   getExpenses,
   createExpense,
   getExpensesByGroup,
@@ -19,59 +19,24 @@ import {
   getSettlementsByGroup,
   deleteSettlement,
 } from '../index';
+import { supabase } from '@/lib/supabase';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const TEST_BACKUP_DIR = path.join(process.cwd(), 'data-backup');
-
-// Backup and restore data files for testing
-async function backupData() {
-  try {
-    await fs.mkdir(TEST_BACKUP_DIR, { recursive: true });
-    const files = ['members.json', 'groups.json', 'expenses.json', 'settlements.json'];
-    for (const file of files) {
-      try {
-        await fs.copyFile(path.join(DATA_DIR, file), path.join(TEST_BACKUP_DIR, file));
-      } catch {
-        // File might not exist
-      }
-    }
-  } catch {
-    // Backup dir might exist
-  }
-}
-
-async function restoreData() {
-  try {
-    const files = ['members.json', 'groups.json', 'expenses.json', 'settlements.json'];
-    for (const file of files) {
-      try {
-        await fs.copyFile(path.join(TEST_BACKUP_DIR, file), path.join(DATA_DIR, file));
-      } catch {
-        // Restore empty array if backup doesn't exist
-        await fs.writeFile(path.join(DATA_DIR, file), '[]');
-      }
-    }
-    await fs.rm(TEST_BACKUP_DIR, { recursive: true, force: true });
-  } catch {
-    // Cleanup
-  }
-}
-
+// Clear all data from Supabase tables
 async function clearData() {
-  const files = ['members.json', 'groups.json', 'expenses.json', 'settlements.json'];
-  for (const file of files) {
-    await fs.writeFile(path.join(DATA_DIR, file), '[]');
-  }
+  // Delete in order respecting foreign key constraints
+  await supabase.from('settlements').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  await supabase.from('expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  await supabase.from('groups').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  await supabase.from('members').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 }
 
 describe('Database Layer', () => {
   beforeAll(async () => {
-    await backupData();
     await clearData();
   });
 
   afterAll(async () => {
-    await restoreData();
+    await clearData();
   });
 
   beforeEach(async () => {
@@ -360,43 +325,6 @@ describe('Database Layer', () => {
 
       const settlements = await getSettlements();
       expect(settlements).toHaveLength(0);
-    });
-  });
-
-  describe('Backward Compatibility', () => {
-    it('should read old expense format with splitBetweenMemberIds', async () => {
-      // Write an old-format expense directly to the JSON file
-      const oldFormatExpense = {
-        id: '550e8400-e29b-41d4-a716-446655440000',
-        groupId: '550e8400-e29b-41d4-a716-446655440001',
-        description: 'Old Dinner',
-        amount: 6000,
-        paidByMemberId: '550e8400-e29b-41d4-a716-446655440002',
-        splitBetweenMemberIds: [
-          '550e8400-e29b-41d4-a716-446655440002',
-          '550e8400-e29b-41d4-a716-446655440003',
-        ],
-        createdAt: '2024-01-01T00:00:00.000Z',
-      };
-
-      await fs.writeFile(
-        path.join(DATA_DIR, 'expenses.json'),
-        JSON.stringify([oldFormatExpense], null, 2)
-      );
-
-      // Should be able to read the expense without error
-      const expenses = await getExpenses();
-      expect(expenses).toHaveLength(1);
-
-      const expense = expenses[0];
-      expect(expense.id).toBe(oldFormatExpense.id);
-      expect(expense.description).toBe('Old Dinner');
-      expect(expense.amount).toBe(6000);
-      // Should have been migrated to new format
-      expect(expense.splitType).toBe('equal');
-      expect(expense.splitDetails).toHaveLength(2);
-      expect(expense.splitDetails[0].memberId).toBe('550e8400-e29b-41d4-a716-446655440002');
-      expect(expense.splitDetails[0].value).toBe(1);
     });
   });
 
